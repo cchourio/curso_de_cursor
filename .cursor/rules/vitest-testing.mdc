@@ -1,0 +1,40 @@
+---
+description: Convenciones de testing con Vitest - qué se testea, dónde viven los tests y criterios mínimos
+globs: **/*.test.ts,**/*.test.tsx,**/vitest.config.ts,**/vitest.setup.ts
+alwaysApply: false
+---
+
+# Testing con Vitest
+
+## Ubicación y ejecución
+
+- Los tests van junto al código: `foo.ts` se acompaña de `foo.test.ts`. Los de rendimiento usan `*.perf.test.ts`.
+- `vitest.config.ts` en la raíz usa `test.projects`, y cada paquete tiene el suyo: `node` para `domain`, `db` y `api`, y `jsdom` con Testing Library para `web`. No crees `vitest.workspace.ts`.
+- `pnpm test` ejecuta todo y `pnpm --filter @ff/<pkg> test` ejecuta un solo paquete.
+
+## Qué se testea en cada capa
+
+| Capa | Cómo | Mínimo exigido |
+|---|---|---|
+| `domain` | Unitario puro, **sin mocks**. | Cada regla y cada límite. El evaluador, una prueba por fila de la tabla de precedencia, más los vectores fijos del bucket. |
+| `db` | `createTestDb()` de `@ff/db/testing` (`:memory:` más migraciones). | Restricciones (PK, FK, checks), seed y lecturas. |
+| `api` | `createTestApp()` y `app.request()`, sin servidor ni puertos. | El caso feliz y cada código de error que define la spec (400, 401, 404, 409). Además, que la auditoría se escribe, o que **no** se escribe en los errores. |
+| `web` | Testing Library y `user-event`, con `fetch` (`vi.stubGlobal`) y `next/navigation` (`vi.mock`) mockeados. | Interacción del usuario, payloads enviados y estados de error, vacío y carga. |
+
+## Criterios
+
+- Cada criterio de aceptación automatizable de la spec tiene al menos un test, y su nombre lo refleja: `it("responde 409 FLAG_ARCHIVED si la flag está archivada")`.
+- Tests deterministas: inyecta `clock` con una fecha fija (por ejemplo, `2026-10-13T12:00:00Z`) y no uses `Math.random` ni dependas de la hora real.
+- Cada test crea su propia base de datos; no compartas estado mutable entre tests.
+- Los vectores del bucket (`checkout.new-flow:acme` = 84, `checkout.new-flow:globex` = 51, `checkout.new-flow:initech` = 22, `search.v2:acme` = 89 y `search.v2:globex` = 4, y 311 de 1.000 bajo el 30 %) son fijos. Si fallan, el bug está en el código, no en el test.
+- En la web, consulta por rol o texto visible (`getByRole`, `getByLabelText`), no por clases ni `data-testid`, salvo que no haya alternativa.
+- No mockees `@ff/domain` en ninguna capa: es la lógica real que se quiere proteger.
+- No se permiten snapshots de componentes, `it.only` ni `it.skip` en commits.
+
+```ts
+// ✅ API: código de error y efecto en la auditoría
+const { request, db } = await createTestApp({ clock: () => new Date("2026-10-13T12:00:00Z") });
+const res = await request("/api/admin/flags/checkout.new-flow", { method: "PATCH", body: JSON.stringify({ reason: "abc" }) });
+expect(res.status).toBe(400);
+expect((await res.json()).error.code).toBe("VALIDATION_ERROR");
+```

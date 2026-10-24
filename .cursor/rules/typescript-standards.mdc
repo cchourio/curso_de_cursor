@@ -1,0 +1,45 @@
+---
+description: Reglas de TypeScript del proyecto - tipado estricto, sin any, tipos compartidos en packages/domain
+alwaysApply: true
+---
+
+# TypeScript
+
+## Configuración (no relajar)
+
+- `strict`, `noUncheckedIndexedAccess`, ESM y `moduleResolution: Bundler`, heredados de `tsconfig.base.json`.
+- `pnpm typecheck` debe terminar con código 0 antes de dar una tarea por terminada.
+
+## Prohibido
+
+- `any`, explícito o implícito. Usa `unknown` y estrecha el tipo con zod o con guards.
+- `@ts-ignore` y `@ts-expect-error` sin un comentario que explique la limitación externa.
+- Las aserciones `as Foo` para silenciar errores. Sí están permitidas `as const` y `satisfies`.
+- La non-null assertion `!`. Maneja el `undefined` de forma explícita.
+- Los `enum` de TypeScript. Usa uniones de literales derivadas de arrays `as const`.
+
+```ts
+// ❌
+enum Env { Dev = "development" }
+const data: any = await res.json();
+
+// ✅
+export const ENVIRONMENTS = ["development", "staging", "production"] as const;
+export type Environment = (typeof ENVIRONMENTS)[number];
+const data: unknown = await res.json();
+const flag = flagStateSchema.parse(data);
+```
+
+## Tipos compartidos
+
+- Los tipos de dominio se definen **una sola vez** en `@ff/domain`: `FlagState`, `EnvironmentRule`, `Company`, `Environment`, `AuditAction`, `EvaluableFlag`, `EvaluationResult`, `EvaluationReason`, `FlagSummary`, `AuditEntry`, `FieldChange` y `ObsoleteReason`. La API y la web los importan; no los redeclaran.
+- Los inputs de la API se definen como esquemas zod en `@ff/domain` y su tipo se obtiene con `z.infer`. Web y API validan con el **mismo** esquema.
+- Los tipos de filas de Drizzle no salen de `packages/db`: se mapean a los tipos de dominio (por ejemplo, con `getFlagState`).
+
+## Convenciones
+
+- Funciones exportadas con tipo de retorno explícito.
+- `interface` para formas de objetos públicos; `type` para uniones y derivados.
+- Fechas como string: ISO 8601 UTC para timestamps y `YYYY-MM-DD` para `expiresAt`. No conviertas `expiresAt` a `Date`.
+- Booleanos con nombres afirmativos (`enabled`, `killSwitch`, `archived`), sin negaciones.
+- `import type` para imports usados solo como tipos.

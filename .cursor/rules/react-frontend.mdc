@@ -1,0 +1,49 @@
+---
+description: Convenciones de componentes React, Next.js App Router y Tailwind en apps/web
+globs: apps/web/src/**/*.tsx,apps/web/src/**/*.ts
+alwaysApply: false
+---
+
+# Frontend (apps/web)
+
+## Estructura
+
+- Las páginas en `src/app/(app)/**/page.tsx` son finas: renderizan un componente cliente de `src/components/<area>/` y no contienen lógica.
+- Un componente por archivo, con nombre de archivo en kebab-case y componente en PascalCase (`reason-dialog.tsx` exporta `ReasonDialog`).
+- Los componentes reutilizables existentes **se reutilizan**, no se reimplementan: `ReasonDialog`, el proveedor de toasts, `EnvironmentBadge` y `apiFetch`.
+- Las nuevas pantallas añaden su entrada en `src/components/nav-items.ts`.
+
+## Datos y API
+
+- Todas las llamadas pasan por `src/lib/api.ts` (`apiFetch`, `ApiClientError`) y por las funciones tipadas de `src/lib/flags-api.ts`. Nunca uses `fetch` directo desde un componente.
+- No hay actualizaciones optimistas: tras una mutación, pinta el estado devuelto por la API.
+- Gestiona siempre tres estados: carga, error (con mensaje y "Reintentar") y vacío.
+- Los errores `400` con `details[{ path, message }]` se muestran bajo el campo correspondiente. Un `409` se traduce a un mensaje específico.
+- Los filtros y parámetros compartibles van en la query string (`useSearchParams` y `useRouter`).
+
+## Reglas de negocio en la UI
+
+- Valida con los esquemas zod de `@ff/domain`; no copies regex ni límites.
+- No evalúes flags ni calcules obsolescencia o diferencias en componentes. Si hace falta en cliente, importa la función de `@ff/domain`.
+- Toda acción que modifica una flag pide motivo mediante `ReasonDialog`. Las acciones destructivas o en `production` usan `tone="danger"`.
+- Una flag archivada se muestra en solo lectura: todo deshabilitado salvo "Desarchivar".
+
+## Accesibilidad y textos
+
+- Textos de UI en español. Los identificadores (`key`, `reason`, códigos) se muestran en monoespaciado, sin traducir.
+- Los controles interactivos son elementos nativos (`button`, `input`, `select`) con `label` o `aria-label`. Los modales usan `role="dialog"` y `aria-modal`, y se cierran con `Escape`.
+- Fechas y números con `Intl` y locale `es`.
+
+## Estilos
+
+- Solo clases de Tailwind. Sin CSS modules, estilos inline ni librerías de componentes.
+- Colores semánticos coherentes: verde para `true` o 100 %, ámbar para rollout parcial u obsoleta, rojo para kill switch o peligro y gris para off o archivada.
+
+```tsx
+// ❌ fetch directo, regex duplicada y sin motivo
+await fetch(`/api/admin/flags/${key}/kill-switch`, { method: "POST", body: JSON.stringify({ enabled: true }) });
+
+// ✅
+<ReasonDialog open={open} title="Activar kill switch" tone="danger" confirmLabel="Activar"
+  onConfirm={(reason) => setKillSwitch(key, { enabled: true, reason })} onCancel={close} />
+```

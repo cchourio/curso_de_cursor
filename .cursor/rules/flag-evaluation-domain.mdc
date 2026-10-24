@@ -1,0 +1,52 @@
+---
+description: La evaluación de flags vive en packages/domain como función pura, separada de la UI y del transporte HTTP
+globs: packages/domain/src/**/*.ts,apps/api/src/routes/evaluate.ts,apps/api/src/routes/simulate.ts,apps/web/src/components/simulator/**/*.tsx
+alwaysApply: false
+---
+
+# Evaluación de flags: lógica pura en `@ff/domain`
+
+## Dónde vive
+
+- `bucket`, `evaluate`, `toEvaluableFlag`, `simulateRollout` y `syntheticCompanyIds` viven **solo** en `packages/domain/src/` (`evaluator.ts` y `simulation.ts`).
+- `apps/api/src/routes/evaluate.ts` (`/api/v1/*`), `apps/api/src/routes/simulate.ts` y la UI del simulador **llaman** a esas funciones. Nunca reimplementan reglas ni comparan `rolloutPercentage` por su cuenta.
+
+## Pureza (obligatoria en `packages/domain`)
+
+- Sin I/O: nada de base de datos, `fetch`, sistema de archivos, `process.env` ni `console`.
+- Sin no determinismo: nada de `Date.now()`, `new Date()` ni `Math.random()`. Si hace falta el tiempo, se recibe como parámetro (`now: Date`).
+- Isomórfico: nada de `node:*`. Para hashing, usa `sha256` de `@noble/hashes`.
+- Sin mutar los argumentos: un override de porcentaje se aplica sobre una copia.
+
+## Contrato del evaluador (no cambiar sin actualizar el PRD)
+
+Orden estricto; gana la primera regla que se cumple:
+
+1. La flag no existe: `false`, `FLAG_NOT_FOUND`.
+2. Está archivada: `false`, `ARCHIVED`.
+3. Tiene el kill switch activo: `false`, `KILL_SWITCH`.
+4. Está deshabilitada en el ambiente: `false`, `ENV_DISABLED`.
+5. La empresa está en `denyCompanies`: `false`, `COMPANY_DENIED`.
+6. La empresa está en `allowCompanies`: `true`, `COMPANY_ALLOWED`.
+7. El rollout es del 100 %: `true`, `ROLLOUT`.
+8. Hay empresa y `bucket < rolloutPercentage`: `true`, `ROLLOUT`.
+9. En cualquier otro caso: `false`, `DEFAULT`.
+
+- El bucket es `SHA-256(UTF-8("<flagKey>:<companyId>"))`; se toman los primeros 4 bytes como uint32 big-endian y se calcula `% 100`. No cambies el separador, la codificación ni el algoritmo, porque romperías la estabilidad del rollout para todos los clientes.
+- `companyId` vacío o ausente equivale a "sin empresa".
+- Siempre se devuelve `{ value, reason }`. El `reason` es parte del contrato público.
+
+## Capa HTTP (transporte)
+
+- El handler solo hace esto: validar el input, cargar el estado (`getFlagState` y `toEvaluableFlag`), llamar a `evaluate` y serializar. Además registra el log estructurado, sin la API key.
+- La flag inexistente se devuelve como `200` con `FLAG_NOT_FOUND`, no como `404`, en `/api/v1/evaluate`.
+
+```ts
+// ❌ regla reimplementada en el handler
+if (flag.environments[env].rolloutPercentage === 100) return c.json({ value: true });
+
+// ✅
+const flag = await getFlagState(db, key);
+const result = evaluate(flag ? toEvaluableFlag(flag, env) : null, company);
+return c.json({ flag: key, env, company: company ?? null, ...result });
+```

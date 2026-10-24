@@ -1,0 +1,38 @@
+---
+description: Estilo de cambios para agentes y humanos - alcance acotado a la spec, commits pequeños y dependencias justificadas
+alwaysApply: true
+---
+
+# Estilo de los cambios
+
+## Antes de empezar
+
+- Identifica la spec que estás implementando (`docs/specs/NN-*.md`) y léela completa. Sus secciones "Alcance" y "Criterios de aceptación" son el contrato.
+- Comprueba que el estado esperado que describe "Contexto y dependencias" existe. Si falta algo de una spec anterior, detente y dilo; no lo implementes de paso.
+- Si la spec es ambigua o contradice el PRD, pregunta antes de decidir.
+
+## Durante el cambio
+
+- **No toques archivos fuera del alcance de la spec.** Las únicas excepciones son las que la propia spec pide (por ejemplo, actualizar tests anteriores en la spec 05) y las roturas que tu cambio provoque directamente.
+- Nada de refactors, renombres ni reformateos oportunistas. Si ves algo mejorable, anótalo en el resumen final.
+- No implementes nada que figure en "Out" de la spec ni en el "Out of scope" del PRD, aunque parezca trivial.
+- Respeta los nombres de archivos, rutas, tipos y códigos de error que fija la spec. Son contratos con las specs siguientes.
+- Las migraciones se generan con `pnpm db:generate` y se commitean. Nunca edites a mano una migración ya commiteada.
+
+## Dependencias
+
+- No instales dependencias que la spec no mencione sin justificarlo explícitamente: qué problema resuelve, por qué no basta con lo existente o con la plataforma, y en qué paquete va.
+- Cada dependencia va en el `package.json` del paquete que la usa, no en la raíz (salvo herramientas como `vitest`).
+- Prohibido añadir librerías de UI, ORMs, frameworks de estado o clientes HTTP alternativos.
+
+## Commits
+
+- Commits pequeños y coherentes, uno por tarea de la spec o por grupo pequeño de tareas.
+- Formato: `<tipo>(<scope>): <descripción>`, con tipo `feat`, `fix`, `test`, `chore`, `refactor` o `docs`, y scope `web`, `api`, `db`, `domain` o `repo`. Ejemplo: `feat(domain): add bucket and evaluate (spec 09)`.
+- Cada commit deja `pnpm typecheck` y `pnpm test` en verde.
+- No mezcles en un mismo commit cambios de comportamiento y de formato.
+
+## Al terminar
+
+- Ejecuta `pnpm typecheck` y `pnpm test`, y verifica cada criterio de aceptación de la spec.
+- Resume qué criterios quedan verificados con tests, cuáles manualmente y cuáles no se pudieron verificar, y por qué.

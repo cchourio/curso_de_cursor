@@ -1,0 +1,44 @@
+---
+description: Arquitectura del monorepo de feature flags y responsabilidades de apps/web, apps/api, packages/db y packages/domain
+alwaysApply: true
+---
+
+# Arquitectura del monorepo
+
+Fuentes de verdad: `docs/prds/feature-flags-prd.md` (qué) y `docs/specs/NN-*.md` (cómo y en qué orden). Si el código contradice una spec, gana la spec; si la spec contradice el PRD, detente y pregunta.
+
+## Paquetes y dependencias permitidas
+
+| Paquete | Responsabilidad | Puede importar |
+|---|---|---|
+| `@ff/domain` (`packages/domain`) | Tipos, esquemas zod, evaluador, bucket, obsolescencia, diff. Lógica pura, sin I/O. | `zod`, `@noble/hashes` |
+| `@ff/db` (`packages/db`) | Esquema Drizzle, migraciones, cliente libSQL, seed, lecturas (`getFlagState`, `listFlagStates`). | `@ff/domain` |
+| `@ff/api` (`apps/api`) | Transporte HTTP con Hono: validación, sesión, API key, transacciones, auditoría, logs. | `@ff/domain`, `@ff/db` |
+| `@ff/web` (`apps/web`) | UI con Next.js App Router y Tailwind. Solo habla con la API por HTTP. | `@ff/domain` |
+
+- Prohibido: que `web` importe `@ff/db`, que `domain` importe cualquier otro paquete del repo o que haya imports relativos entre paquetes (`../../packages/...`).
+- Los paquetes internos se consumen como código fuente (`exports` hacia `./src/index.ts`). Exporta todo lo público desde `src/index.ts`.
+
+## Reglas de ubicación
+
+- Reglas de negocio (evaluación, validaciones, "sin cambios", obsolescencia, diff): en `packages/domain`. API y web las **reutilizan**; nunca las duplican.
+- SQL y Drizzle: solo en `packages/db` y en los servicios de `apps/api/src/services/`. Los handlers de rutas no construyen queries.
+- Toda mutación de una flag sigue este patrón dentro de **una** transacción: leer el estado, cambiarlo, releerlo e insertar en `audit_log` con `before_state` y `after_state` completos y el motivo.
+- La auditoría es inmutable: no existen rutas ni funciones para actualizarla o borrarla.
+
+## Convenciones de la API
+
+- Todo cuelga de `/api`. Las rutas de administración van en `/api/admin/*` (con sesión), la evaluación pública en `/api/v1/*` (con `X-API-Key`) y la autenticación en `/api/auth/*`.
+- `createApp(deps: AppDeps)` no abre puertos. Inyecta `db`, `clock`, `auth`, `evalApiKey` y `logger`; nunca uses `new Date()` directamente en la lógica.
+- Errores siempre con `ApiError`, en el formato `{ error: { code, message, details? } }`.
+- Un archivo de rutas por recurso en `apps/api/src/routes/`: `flags.ts`, `companies.ts`, `auth.ts`, `evaluate.ts` (`/api/v1/*`) y `simulate.ts`.
+
+## Convenciones de la web
+
+- El navegador llama a rutas relativas `/api/*`, que Next.js reescribe hacia la API (puerto 3001). No uses URLs absolutas a la API ni configures CORS.
+- Las pantallas autenticadas van en `src/app/(app)/` y el login en `src/app/(auth)/login`.
+- Componentes por área: `src/components/<area>/`. Por ejemplo, `dashboard/`, `flags/`, `targeting/`, `simulator/` y `history/`.
+
+## Fuera de alcance del MVP (no implementar)
+
+OAuth, SSO, roles, permisos, flags no booleanas, experimentos A/B, targeting por usuario, notificaciones, varias instancias, y `DELETE` de flags o empresas.

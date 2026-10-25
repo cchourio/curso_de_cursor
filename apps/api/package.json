@@ -1,0 +1,23 @@
+{
+  "name": "@ff/api",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@ff/domain": "workspace:*",
+    "@hono/node-server": "^2.1.5",
+    "dotenv": "^16.6.1",
+    "hono": "^4.10.2",
+    "zod": "^4.1.12"
+  },
+  "devDependencies": {
+    "@types/node": "^24.9.1",
+    "tsx": "^4.20.6",
+    "typescript": "^7.0.2"
+  }
+}

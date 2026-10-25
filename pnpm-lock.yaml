@@ -10,6 +10,9 @@ importers:
 
   apps/api:
     dependencies:
+      '@ff/db':
+        specifier: workspace:*
+        version: link:../../packages/db
       '@ff/domain':
         specifier: workspace:*
         version: link:../../packages/domain
@@ -19,6 +22,9 @@ importers:
       dotenv:
         specifier: ^16.6.1
         version: 16.6.1
+      drizzle-orm:
+        specifier: ^0.44.7
+        version: 0.44.7(@libsql/client@0.15.15)
       hono:
         specifier: ^4.10.2
         version: 4.13.14
@@ -35,6 +41,9 @@ importers:
       typescript:
         specifier: ^7.0.2
         version: 7.0.2
+      vitest:
+        specifier: ^3.2.4
+        version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
   apps/web:
     dependencies:
@@ -99,6 +108,10 @@ importers:
         version: 3.2.7(@types/node@24.19.2)(jiti@2.7.0)(lightningcss@1.32.0)(tsx@4.23.15)
 
   packages/domain:
+    dependencies:
+      zod:
+        specifier: ^4.1.12
+        version: 4.6.7
     devDependencies:
       typescript:
         specifier: ^7.0.2

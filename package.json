@@ -9,7 +9,7 @@
     "dev": "pnpm -r --parallel --filter \"./apps/*\" dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
-    "test": "pnpm --filter @ff/db test",
+    "test": "pnpm --filter @ff/db --filter @ff/api test",
     "db:generate": "pnpm --filter @ff/db db:generate",
     "db:migrate": "pnpm --filter @ff/db db:migrate",
     "db:seed": "pnpm --filter @ff/db db:seed",

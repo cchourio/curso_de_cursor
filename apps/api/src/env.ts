@@ -8,6 +8,10 @@ config({ path: resolve(repoRoot, ".env") });
 
 const envSchema = z.object({
   API_PORT: z.coerce.number().int().min(1).max(65535).default(3001),
+  DATABASE_URL: z
+    .string()
+    .optional()
+    .transform((value) => (value === undefined || value.length === 0 ? undefined : value)),
 });
 
 export type Env = z.infer<typeof envSchema>;

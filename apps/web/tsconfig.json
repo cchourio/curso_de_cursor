@@ -20,7 +20,7 @@
       ]
     },
     "incremental": true,
-    "types": ["node"]
+    "types": ["node", "@testing-library/jest-dom"]
   },
   "include": [
     "next-env.d.ts",

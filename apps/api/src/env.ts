@@ -12,12 +12,15 @@ const envSchema = z.object({
     .string()
     .optional()
     .transform((value) => (value === undefined || value.length === 0 ? undefined : value)),
+  DEMO_USERNAME: z.string().min(1, "Debe tener al menos 1 carácter"),
+  DEMO_PASSWORD: z.string().min(8, "Debe tener al menos 8 caracteres"),
+  SESSION_SECRET: z.string().min(32, "Debe tener al menos 32 caracteres"),
 });
 
 export type Env = z.infer<typeof envSchema>;
 
-function loadEnv(): Env {
-  const result = envSchema.safeParse(process.env);
+export function parseEnv(source: Record<string, string | undefined>): Env {
+  const result = envSchema.safeParse(source);
   if (!result.success) {
     const details = result.error.issues
       .map((issue) => `${issue.path.join(".")}: ${issue.message}`)
@@ -27,4 +30,4 @@ function loadEnv(): Env {
   return result.data;
 }
 
-export const env: Env = loadEnv();
+export const env: Env = parseEnv(process.env);

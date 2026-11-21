@@ -10,22 +10,23 @@ Construir la pantalla principal (`/`): resumen de flags activas y obsoletas, pan
 - **Regla de obsolescencia (PRD RF-21).** Una flag **no archivada** es obsoleta si cumple al menos una de estas condiciones:
   - `EXPIRED`: su `expiresAt` (fecha `YYYY-MM-DD`) es anterior a la fecha UTC actual. Si vence hoy, todavía no es obsoleta.
   - `STALE_PRODUCTION`: en `production`, `rolloutPercentage` es 0 o 100 y su regla lleva **30 días o más** sin cambios (`now - environments.production.updatedAt >= 30 días`).
+- **Estado actual (specs 01–05 hechas).** No las reimplementes.
+  - `@ff/domain` exporta `ENVIRONMENTS`, `FlagState`, `EnvironmentRule` y los esquemas zod de flag y empresa. Todavía no exporta `FlagSummary`, `ObsoleteReason` ni `getObsolescence`: los añade esta spec.
+  - `FlagState`: `{ key, name, description, owner, expiresAt, killSwitch, archived, environments: Record<Environment, EnvironmentRule>, createdAt, updatedAt }`.
+  - `EnvironmentRule`: `{ enabled, rolloutPercentage, allowCompanies, denyCompanies, updatedAt }`.
+  - El seed tiene tres flags, ninguna archivada: `checkout.new-flow`, `search.v2` y `legacy.banner`. Esta última vence el `2026-01-01`, su owner es `Equipo Growth` y en production está al 100 % desde hace 45 días. Con `clock = 2026-10-13T12:00:00.000Z` es la única obsoleta, así que el resumen es `activeCount: 3`, `archivedCount: 0`, `obsoleteCount: 1`.
+  - `GET /api/admin/flags?q=&status=active|archived|all` devuelve hoy `{ items: FlagState[] }`. Esta spec cambia cada elemento a `FlagSummary`. `POST`, `GET /:key` y `PATCH` siguen devolviendo `FlagState`.
+  - `createApp(deps)` inyecta `db`, `clock` y `auth`. `createTestApp()` devuelve `{ app, db, request }`. `request()` ya inicia sesión; `app.request` no.
+  - La cookie de sesión es `ff_session`. En Next 16 la redirección vive en `apps/web/src/proxy.ts` (`export function proxy`), no en `middleware.ts`.
+  - La web llama a la API con `apiFetch` (`apps/web/src/lib/api.ts`). El layout autenticado está en `src/app/(app)/layout.tsx`, la navegación en `src/components/nav-items.ts` (solo "Flags") y `src/app/(app)/page.tsx` es el contenido provisional que esta spec reemplaza.
+- **Multitask.** Esta spec es la primera de la cola 06 → 07 → 08 → 11. Arráncala sola.
+  - No depende de las specs 07, 08 ni 11, y ninguna de esas tres puede empezar mientras esta no esté en verde: la 07 edita el dashboard que creas aquí, y la 08 y la 11 escriben los mismos archivos de API que esta spec.
+  - Archivos de esta spec: `packages/domain/src/obsolescence.ts`, el export nuevo en `packages/domain/src/index.ts`, el listado en `apps/api/src/services/flags.ts` y `apps/api/src/routes/flags.ts`, la ruta nueva `GET /api/admin/dashboard/summary` (móntala desde `apps/api/src/app.ts`), `src/app/(app)/page.tsx`, `src/components/dashboard/` y `src/components/flags/environment-badge.tsx`.
+  - No toques `packages/domain/src/validation.ts`, `packages/db`, `src/components/reason-dialog.tsx`, `src/lib/flags-api.ts`, `src/app/(app)/flags/` ni `nav-items.ts`.
 - **Depende de:**
-  - **Spec 03:** `@ff/domain` exporta `ENVIRONMENTS` y los tipos `FlagState` y `EnvironmentRule`:
-    - `FlagState`: `{ key, name, description, owner, expiresAt, killSwitch, archived, environments: Record<Environment, EnvironmentRule>, createdAt, updatedAt }`.
-    - `EnvironmentRule`: `{ enabled, rolloutPercentage, allowCompanies, denyCompanies, updatedAt }`.
-
-    El seed incluye `legacy.banner`, que está vencida y lleva 45 días al 100 % en production.
-  - **Spec 04:**
-    - `GET /api/admin/flags?q=&status=active|archived|all` devuelve `{ items: FlagState[] }`.
-    - `createApp(deps)` con `deps.clock` inyectable.
-    - Errores `{ error: { code, message } }`.
-    - `createTestApp()` devuelve `{ app, db, request }`.
-  - **Spec 05:**
-    - `/api/admin/*` exige sesión; `request()` del helper ya la incluye.
-    - La web tiene `src/lib/api.ts` con `apiFetch` y `ApiClientError`.
-    - El layout autenticado está en `src/app/(app)/layout.tsx` y la navegación en `src/components/nav-items.ts`.
-    - `src/app/(app)/page.tsx` es provisional y esta spec lo reemplaza.
+  - **Spec 03:** tipos `FlagState` y `EnvironmentRule`, y el seed descrito arriba.
+  - **Spec 04:** listado, `deps.clock`, errores `{ error: { code, message } }` y `createTestApp()`.
+  - **Spec 05:** sesión en `/api/admin/*`, `apiFetch`, layout autenticado y la página provisional.
 
 ## Alcance
 

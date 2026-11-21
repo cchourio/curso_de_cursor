@@ -16,22 +16,22 @@ Permitir configurar, por flag y por ambiente, si la flag está habilitada, su po
   | `denyCompanies` | Empresas que siempre reciben `false`. |
 
   Una empresa no puede estar en ambas listas del mismo ambiente, y las listas solo aceptan empresas del catálogo. La evaluación de estas reglas es la spec 09; esta spec solo las guarda.
+- **Estado actual (specs 01–05 hechas).** El esquema ya admite la acción `targeting_update` en `AUDIT_ACTIONS` y en el `CHECK` de `audit_log`. No generes una migración para eso. No hay `environmentRuleInputSchema` ni `PUT` de ambiente: los añade esta spec.
+  - `getFlagState(db, key)` y `listCompanies(db)` ya existen. Las listas de `FlagState.environments[env]` vienen ordenadas.
+  - Empresas: `GET` y `POST /api/admin/companies` y `PATCH /api/admin/companies/:id`. No hay `DELETE`. El catálogo del seed incluye `acme`, `globex`, `initech` y `hooli`.
+  - `createTestApp().request()` ya lleva la sesión. `apiFetch` está en `apps/web/src/lib/api.ts`. `nav-items.ts` solo tiene `{ href: "/", label: "Flags" }`.
+  - Las mutaciones de la spec 04 usan `BEGIN`/`COMMIT` sobre la misma conexión (libSQL en `:memory:` no ve las tablas si se usa `db.transaction()`). Sigue ese patrón. `updated_at` del ambiente cambia solo en el ambiente editado: la spec 06 decide `STALE_PRODUCTION` con `environments.production.updatedAt`, y la spec 11 comprueba que un rollback no toca el `updatedAt` de los otros ambientes.
+- **Multitask.** Empieza solo cuando la spec 07 esté terminada. No la corras en paralelo con la 06, la 07 ni la 11.
+  - El `PUT` no necesita la UI, pero la spec se entrega entera. Partirla choca igual: las tareas de API escriben `packages/domain/src/index.ts`, `packages/domain/src/validation.ts`, `apps/api/src/routes/flags.ts` y `apps/api/src/services/flags.ts`, que la 06 también modifica y que la 11 vuelve a modificar.
+  - La UI sustituye el marcador de `FlagDetail` y añade funciones a `src/lib/flags-api.ts`. Esos dos archivos los crea la spec 07. `ReasonDialog` y los toasts también tienen que existir ya.
+  - El criterio manual mira el badge de Production en el dashboard de la spec 06, así que esa pantalla también tiene que estar hecha.
+  - No toques el listado, el resumen, `obsolescence.ts`, el dashboard, `environment-badge.tsx` (solo impórtalo si ya lo usa el detalle), ni `audit`/`rollback`. No borres empresas.
 - **Depende de:**
-  - **Spec 03:**
-    - Tablas `flag_environments` (PK `flag_key` + `environment`, con `enabled`, `rollout_percentage` y `updated_at`) y `flag_environment_companies` (PK `flag_key` + `environment` + `company_id`, con `list` = `allow` o `deny`, y FK a `companies`).
-    - `getFlagState(db, key)` devuelve `FlagState`, con `environments[env]` igual a `{ enabled, rolloutPercentage, allowCompanies, denyCompanies, updatedAt }` y las listas ordenadas.
-    - `listCompanies(db)`.
-  - **Spec 04:**
-    - Patrón de mutación: transacción, estado anterior, cambio, actualización de `flags.updated_at`, estado nuevo e inserción en `audit_log` con `before_state` y `after_state` completos.
-    - `ApiError` con el formato `{ error: { code, message, details? } }`.
-    - `deps.clock`.
-    - Rutas en `apps/api/src/routes/flags.ts`.
-    - Empresas: `GET` y `POST /api/admin/companies` y `PATCH /api/admin/companies/:id`, con `createCompanyInputSchema`, `updateCompanyInputSchema` y `companyIdSchema` en `@ff/domain`.
-    - `createTestApp()`.
-  - **Spec 05:** sesión obligatoria en `/api/admin/*`, `apiFetch` en la web y `nav-items.ts` para la navegación.
-  - **Spec 07:**
-    - `ReasonDialog` (`src/components/reason-dialog.tsx`), toasts y `src/lib/flags-api.ts`.
-    - La página `/flags/[key]` (`FlagDetail`) tiene una sección "Ambientes" de solo lectura con el marcador `{/* Targeting: spec 08 */}`, y muestra el modo solo lectura cuando la flag está archivada.
+  - **Spec 03:** tablas `flag_environments` y `flag_environment_companies`, `getFlagState` y `listCompanies`.
+  - **Spec 04:** patrón de mutación y auditoría, `ApiError`, `deps.clock`, rutas de flags, API de empresas y `createTestApp()`.
+  - **Spec 05:** sesión en `/api/admin/*`, `apiFetch` y `nav-items.ts`.
+  - **Spec 06:** dashboard en `/` con `EnvironmentBadge`, porque el criterio manual comprueba ahí el `50 %` de Production.
+  - **Spec 07:** `ReasonDialog`, toasts, `src/lib/flags-api.ts` y `FlagDetail` en `/flags/[key]`, con la sección "Ambientes" de solo lectura, el marcador `{/* Targeting: spec 08 */}` y el modo solo lectura si la flag está archivada.
 
 ## Alcance
 

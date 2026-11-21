@@ -79,7 +79,51 @@ export const reasonOnlyInputSchema = z.object({
   reason: reasonSchema,
 });
 
+export const rollbackInputSchema = z.object({
+  auditId: z.number().refine((value) => Number.isInteger(value) && value > 0, "Debe ser un id de auditoría"),
+  reason: reasonSchema,
+});
+
 export const companyIdSchema = z.string().regex(/^[a-z0-9][a-z0-9_-]{1,63}$/);
+
+const companyIdListSchema = z.array(companyIdSchema).superRefine((ids, ctx) => {
+  const seen = new Set<string>();
+  for (const [index, id] of ids.entries()) {
+    if (seen.has(id)) {
+      ctx.addIssue({
+        code: "custom",
+        message: "No se permiten empresas duplicadas",
+        path: [index],
+      });
+    }
+    seen.add(id);
+  }
+});
+
+export const environmentRuleInputSchema = z
+  .object({
+    enabled: z.boolean(),
+    rolloutPercentage: z
+      .number()
+      .min(0)
+      .max(100)
+      .refine((value) => Number.isInteger(value), "Debe ser un entero"),
+    allowCompanies: companyIdListSchema,
+    denyCompanies: companyIdListSchema,
+    reason: reasonSchema,
+  })
+  .superRefine((value, ctx) => {
+    const allowed = new Set(value.allowCompanies);
+    for (const id of value.denyCompanies) {
+      if (allowed.has(id)) {
+        ctx.addIssue({
+          code: "custom",
+          message: `La empresa ${id} no puede estar en ambas listas`,
+          path: ["denyCompanies"],
+        });
+      }
+    }
+  });
 
 export const createCompanyInputSchema = z.object({
   id: companyIdSchema,
@@ -91,8 +135,10 @@ export const updateCompanyInputSchema = z.object({
 });
 
 export type CreateFlagInput = z.infer<typeof createFlagInputSchema>;
+export type EnvironmentRuleInput = z.infer<typeof environmentRuleInputSchema>;
 export type UpdateFlagInput = z.infer<typeof updateFlagInputSchema>;
 export type KillSwitchInput = z.infer<typeof killSwitchInputSchema>;
 export type ReasonOnlyInput = z.infer<typeof reasonOnlyInputSchema>;
+export type RollbackInput = z.infer<typeof rollbackInputSchema>;
 export type CreateCompanyInput = z.infer<typeof createCompanyInputSchema>;
 export type UpdateCompanyInput = z.infer<typeof updateCompanyInputSchema>;

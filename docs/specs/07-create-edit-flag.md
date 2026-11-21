@@ -12,8 +12,18 @@ Permitir desde la web crear una flag, editar su información general, activar o 
   - El **kill switch** fuerza `false` en todos los ambientes.
   - Una flag **archivada** es de solo lectura y se evalúa siempre como `false`.
   - Cada cambio exige un **motivo** de al menos 5 caracteres, que queda en la auditoría.
+- **Estado actual (specs 01–05 hechas; la 06 tiene que estarlo antes de empezar).**
+  - La API de flags y empresas de la spec 04 ya responde. No añadas endpoints ni cambies sus contratos. `description` vacía llega como `""` y la API la guarda como `null`.
+  - `@ff/domain` ya exporta `createFlagInputSchema`, `updateFlagInputSchema`, `killSwitchInputSchema`, `reasonOnlyInputSchema`, `reasonSchema` y `flagKeySchema`. Reutilízalos en el cliente. `FlagSummary` no sale de la spec 04: lo exporta la spec 06, y el listado `GET /api/admin/flags` pasa a devolver `{ items: FlagSummary[] }`. `POST`, `GET /:key`, `PATCH`, kill switch, archive y unarchive siguen devolviendo `FlagState`.
+  - `apiFetch` y `ApiClientError { status, code, message, details }` están en `apps/web/src/lib/api.ts`. Las pantallas autenticadas viven en `src/app/(app)/`. El layout de esa ruta es donde se monta el proveedor de toasts.
+- **Multitask.** Empieza solo cuando la spec 06 esté terminada (`pnpm typecheck` y `pnpm test` en verde, dashboard y `environment-badge.tsx` ya en el árbol). No la corras en paralelo con la 06, la 08 ni la 11.
+  - Con la 06 el conflicto es `src/app/(app)/page.tsx` y `src/components/dashboard/`: esta spec añade ahí el kill switch de fila, y la 06 está creando esos archivos.
+  - Con la 08 el conflicto es `src/app/(app)/flags/[key]/` y `src/lib/flags-api.ts`: la 08 sustituye el marcador `{/* Targeting: spec 08 */}` y añade funciones al cliente que esta spec crea.
+  - Con la 11 el conflicto es el mismo cliente, `ReasonDialog` y el enlace "Historial". La 11 no puede cumplir su escenario de targeting sin la spec 08, así que va después de las dos.
+  - Archivos de esta spec: `src/components/reason-dialog.tsx`, `src/components/toast.tsx`, `src/app/(app)/layout.tsx` (solo para montar los toasts), `src/app/(app)/flags/new/`, `src/app/(app)/flags/[key]/page.tsx`, el kill switch de fila en el dashboard y `src/lib/flags-api.ts`.
+  - No toques `packages/domain`, `packages/db` ni `apps/api`. No implementes el editor de targeting ni la página de historial: deja el marcador y el enlace.
 - **Depende de:**
-  - **Spec 04:** la API ya implementa todo lo necesario. Todas las respuestas de flag son `FlagState`.
+  - **Spec 04:** la API ya implementa todo lo necesario.
 
     | Endpoint | Body | Respuestas |
     |---|---|---|
@@ -23,11 +33,8 @@ Permitir desde la web crear una flag, editar su información general, activar o 
     | `POST /api/admin/flags/:key/kill-switch` | `{ enabled, reason }` | `200`, `400 NO_CHANGES`, `409 FLAG_ARCHIVED` |
     | `POST /api/admin/flags/:key/archive` y `/unarchive` | `{ reason }` | `200`, `409 CONFLICT` |
 
-    `@ff/domain` exporta `createFlagInputSchema`, `updateFlagInputSchema`, `reasonSchema`, `flagKeySchema` (zod) y los tipos `FlagState` y `FlagSummary`.
-  - **Spec 05:** `apiFetch` y `ApiClientError { status, code, message, details }` en `apps/web/src/lib/api.ts`. Las páginas autenticadas viven en `src/app/(app)/`.
-  - **Spec 06:**
-    - El dashboard `/` (componente `FlagsDashboard`) tiene una tabla con una columna Estado, el botón "Nueva flag" (que enlaza a `/flags/new`) y enlaces de fila a `/flags/<key>`.
-    - Existe `src/components/flags/environment-badge.tsx`.
+  - **Spec 05:** `apiFetch`, `ApiClientError` y las páginas bajo `src/app/(app)/`.
+  - **Spec 06:** `FlagsDashboard` en `/`, con la columna Estado, el enlace "Nueva flag" hacia `/flags/new`, los enlaces de fila hacia `/flags/<key>` y `src/components/flags/environment-badge.tsx`. El listado que consume el dashboard ya es `FlagSummary`.
 
 ## Alcance
 

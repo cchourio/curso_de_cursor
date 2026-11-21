@@ -71,6 +71,7 @@ export const auditLog = sqliteTable(
     beforeState: text("before_state"),
     afterState: text("after_state").notNull(),
     createdAt: text("created_at").notNull(),
+    rollbackOfId: integer("rollback_of_id"),
   },
   (table) => [
     check(
@@ -78,5 +79,9 @@ export const auditLog = sqliteTable(
       sql`${table.action} IN ('create', 'update', 'archive', 'unarchive', 'kill_switch_on', 'kill_switch_off', 'targeting_update', 'rollback')`,
     ),
     index("audit_log_flag_key_id_idx").on(table.flagKey, table.id),
+    foreignKey({
+      columns: [table.rollbackOfId],
+      foreignColumns: [table.id],
+    }),
   ],
 );

@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "libsql": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@xexr/mcp-libsql",
+        "--url",
+        "file:///C:/xampp/htdocs/Cursor/data/flags.db"
+      ]
+    }
+  }
+}

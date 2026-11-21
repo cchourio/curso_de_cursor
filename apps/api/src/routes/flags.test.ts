@@ -106,6 +106,62 @@ function asFlag(value: unknown): FlagState {
   };
 }
 
+function asSummary(value: unknown): { key: string; obsolescence: string[]; lastChangedAt: string } {
+  const flag = asFlag(value);
+  const body = record(value);
+  if (!Array.isArray(body.obsolescence) || typeof body.lastChangedAt !== "string") {
+    throw new Error("La respuesta no es un FlagSummary");
+  }
+  const obsolescence: string[] = [];
+  for (const reason of body.obsolescence) {
+    if (typeof reason !== "string") {
+      throw new Error("motivo inválido");
+    }
+    obsolescence.push(reason);
+  }
+  return { key: flag.key, obsolescence, lastChangedAt: body.lastChangedAt };
+}
+
+function summaryOf(value: unknown): {
+  activeCount: number;
+  archivedCount: number;
+  obsoleteCount: number;
+  owner: string;
+  reasons: string[];
+} {
+  const body = record(value);
+  if (
+    typeof body.activeCount !== "number" ||
+    typeof body.archivedCount !== "number" ||
+    typeof body.obsoleteCount !== "number" ||
+    !Array.isArray(body.obsolete)
+  ) {
+    throw new Error("resumen inválido");
+  }
+  const first = body.obsolete[0];
+  if (first === undefined) {
+    throw new Error("sin obsoletas");
+  }
+  const item = record(first);
+  if (typeof item.owner !== "string" || !Array.isArray(item.reasons)) {
+    throw new Error("obsoleta inválida");
+  }
+  const reasons: string[] = [];
+  for (const reason of item.reasons) {
+    if (typeof reason !== "string") {
+      throw new Error("motivo inválido");
+    }
+    reasons.push(reason);
+  }
+  return {
+    activeCount: body.activeCount,
+    archivedCount: body.archivedCount,
+    obsoleteCount: body.obsoleteCount,
+    owner: item.owner,
+    reasons,
+  };
+}
+
 function snapshotName(value: string | null): string {
   if (value === null) {
     throw new Error("el snapshot es null");
@@ -121,6 +177,100 @@ function snapshotName(value: string | null): string {
 async function auditRows(db: Db, flagKey: string) {
   return db.select().from(schema.auditLog).where(eq(schema.auditLog.flagKey, flagKey));
 }
+
+function auditFlag(value: string | null): FlagState {
+  if (value === null) {
+    throw new Error("el snapshot es null");
+  }
+  const parsed: unknown = JSON.parse(value);
+  return asFlag(parsed);
+}
+
+function companyIdOf(value: unknown): string {
+  const error = record(record(value).error);
+  if (!Array.isArray(error.details)) {
+    throw new Error("sin details");
+  }
+  const first = error.details[0];
+  if (first === undefined) {
+    throw new Error("sin details");
+  }
+  const companyId = record(first).companyId;
+  if (typeof companyId !== "string") {
+    throw new Error("sin companyId");
+  }
+  return companyId;
+}
+
+interface ListedChange {
+  path: string;
+  before: unknown;
+  after: unknown;
+}
+
+interface ListedAudit {
+  id: number;
+  action: string;
+  rollbackOfId: number | null;
+  changes: ListedChange[];
+}
+
+function listedChanges(value: unknown): ListedChange[] {
+  if (!Array.isArray(value)) {
+    throw new Error("changes no es una lista");
+  }
+  return value.map((item) => {
+    const change = record(item);
+    if (typeof change.path !== "string" || !Object.hasOwn(change, "before") || !Object.hasOwn(change, "after")) {
+      throw new Error("cambio inválido");
+    }
+    return { path: change.path, before: change.before, after: change.after };
+  });
+}
+
+function auditList(value: unknown): { items: ListedAudit[]; nextCursor: number | null } {
+  const body = record(value);
+  if (!Array.isArray(body.items)) {
+    throw new Error("items no es una lista");
+  }
+  if (!(body.nextCursor === null || typeof body.nextCursor === "number")) {
+    throw new Error("nextCursor inválido");
+  }
+  const items = body.items.map((item) => {
+    const entry = record(item);
+    if (typeof entry.id !== "number" || typeof entry.action !== "string") {
+      throw new Error("entrada inválida");
+    }
+    if (!(entry.rollbackOfId === null || typeof entry.rollbackOfId === "number")) {
+      throw new Error("rollbackOfId inválido");
+    }
+    return {
+      id: entry.id,
+      action: entry.action,
+      rollbackOfId: entry.rollbackOfId,
+      changes: listedChanges(entry.changes),
+    };
+  });
+  return { items, nextCursor: body.nextCursor };
+}
+
+function productionBody(rolloutPercentage: number, reason: string): string {
+  return JSON.stringify({
+    enabled: true,
+    rolloutPercentage,
+    allowCompanies: [],
+    denyCompanies: [],
+    reason,
+  });
+}
+
+const STAGING_OPEN = {
+  enabled: true,
+  rolloutPercentage: 100,
+  allowCompanies: [] as string[],
+  denyCompanies: [] as string[],
+  reason: "Abrir en staging",
+};
 
 function flagBody(overrides: Record<string, unknown> = {}): string {
   return JSON.stringify({
@@ -416,5 +566,333 @@ describe("flags", () => {
     const state = await getFlagState(db, "checkout.new-flow");
     expect(state?.name).toBe("Checkout");
     expect((await auditRows(db, "checkout.new-flow")).map((row) => row.action)).toEqual(["create"]);
+  });
+
+  it("GET /api/admin/flags?obsolete=true devuelve solo legacy.banner con EXPIRED y STALE_PRODUCTION", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const response = await request("/api/admin/flags?obsolete=true");
+    expect(response.status).toBe(200);
+    const items = record(await readBody(response)).items;
+    if (!Array.isArray(items)) {
+      throw new Error("items no es una lista");
+    }
+    expect(items).toHaveLength(1);
+    const first = items[0];
+    if (first === undefined) {
+      throw new Error("items vacío");
+    }
+    const item = asSummary(first);
+    expect(item.key).toBe("legacy.banner");
+    expect(item.obsolescence).toEqual(["EXPIRED", "STALE_PRODUCTION"]);
+    expect(item.lastChangedAt).toBe(NOW.toISOString());
+
+    const filtered = record(await readBody(await request("/api/admin/flags?obsolete=true&q=search"))).items;
+    expect(filtered).toEqual([]);
+  });
+
+  it("GET /api/admin/dashboard/summary cuenta activas, archivadas y obsoletas del seed", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const response = await request("/api/admin/dashboard/summary");
+    expect(response.status).toBe(200);
+    const summary = summaryOf(await readBody(response));
+    expect(summary.activeCount).toBe(3);
+    expect(summary.archivedCount).toBe(0);
+    expect(summary.obsoleteCount).toBe(1);
+    expect(summary.owner).toBe("Equipo Growth");
+    expect(summary.reasons).toEqual(["EXPIRED", "STALE_PRODUCTION"]);
+  });
+
+  it("responde 401 sin sesión en el listado y en el resumen", async () => {
+    const { app } = await createTestApp({ clock });
+    const flags = await app.request("/api/admin/flags");
+    const summary = await app.request("/api/admin/dashboard/summary");
+    expect(flags.status).toBe(401);
+    expect(summary.status).toBe(401);
+    expect(errorOf(await readBody(flags)).code).toBe("UNAUTHORIZED");
+    expect(errorOf(await readBody(summary)).code).toBe("UNAUTHORIZED");
+  });
+
+  it("PUT de staging guarda la regla y solo actualiza ese ambiente", async () => {
+    const later = new Date("2026-10-20T09:00:00.000Z");
+    const { request, db } = await createTestApp({ clock: () => later });
+    await seed(db, NOW);
+    const response = await request("/api/admin/flags/search.v2/environments/staging", {
+      method: "PUT",
+      body: JSON.stringify(STAGING_OPEN),
+    });
+    expect(response.status).toBe(200);
+    const flag = asFlag(await readBody(response));
+    expect(flag.environments.staging).toEqual({
+      enabled: true,
+      rolloutPercentage: 100,
+      allowCompanies: [],
+      denyCompanies: [],
+      updatedAt: later.toISOString(),
+    });
+    expect(flag.environments.development.updatedAt).toBe(NOW.toISOString());
+    expect(flag.environments.production.updatedAt).toBe(NOW.toISOString());
+  });
+
+  it("PUT de staging audita targeting_update y deja los otros ambientes iguales", async () => {
+    const later = new Date("2026-10-20T09:00:00.000Z");
+    const { request, db } = await createTestApp({ clock: () => later });
+    await seed(db, NOW);
+    const response = await request("/api/admin/flags/search.v2/environments/staging", {
+      method: "PUT",
+      body: JSON.stringify(STAGING_OPEN),
+    });
+    expect(response.status).toBe(200);
+    const rows = await auditRows(db, "search.v2");
+    const targeting = rows.filter((row) => row.action === "targeting_update");
+    expect(targeting).toHaveLength(1);
+    const entry = targeting[0];
+    if (entry === undefined) {
+      throw new Error("sin auditoría");
+    }
+    const before = auditFlag(entry.beforeState);
+    const after = auditFlag(entry.afterState);
+    expect(JSON.stringify(before.environments.staging)).not.toBe(JSON.stringify(after.environments.staging));
+    expect(JSON.stringify(before.environments.development)).toBe(JSON.stringify(after.environments.development));
+    expect(JSON.stringify(before.environments.production)).toBe(JSON.stringify(after.environments.production));
+  });
+
+  it("PUT con un ambiente inválido responde 400 INVALID_ENVIRONMENT antes de validar el body", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const response = await request("/api/admin/flags/search.v2/environments/prod", {
+      method: "PUT",
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(400);
+    expect(errorOf(await readBody(response)).code).toBe("INVALID_ENVIRONMENT");
+  });
+
+  it("PUT con una empresa inexistente responde 400 UNKNOWN_COMPANY", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const response = await request("/api/admin/flags/search.v2/environments/staging", {
+      method: "PUT",
+      body: JSON.stringify({ ...STAGING_OPEN, allowCompanies: ["no-existe"] }),
+    });
+    expect(response.status).toBe(400);
+    const body = await readBody(response);
+    expect(record(record(body).error).code).toBe("UNKNOWN_COMPANY");
+    expect(companyIdOf(body)).toBe("no-existe");
+  });
+
+  it("repetir el mismo PUT responde 400 NO_CHANGES y no audita de nuevo", async () => {
+    const later = new Date("2026-10-20T09:00:00.000Z");
+    const { request, db } = await createTestApp({ clock: () => later });
+    await seed(db, NOW);
+    const first = await request("/api/admin/flags/search.v2/environments/staging", {
+      method: "PUT",
+      body: JSON.stringify(STAGING_OPEN),
+    });
+    expect(first.status).toBe(200);
+    const before = (await auditRows(db, "search.v2")).filter((row) => row.action === "targeting_update");
+    const second = await request("/api/admin/flags/search.v2/environments/staging", {
+      method: "PUT",
+      body: JSON.stringify(STAGING_OPEN),
+    });
+    expect(second.status).toBe(400);
+    expect(errorOf(await readBody(second)).code).toBe("NO_CHANGES");
+    const after = (await auditRows(db, "search.v2")).filter((row) => row.action === "targeting_update");
+    expect(after).toHaveLength(before.length);
+  });
+
+  it("compara las listas de empresas como conjuntos", async () => {
+    const later = new Date("2026-10-20T09:00:00.000Z");
+    const { request, db } = await createTestApp({ clock: () => later });
+    await seed(db, NOW);
+    const firstBody = {
+      enabled: true,
+      rolloutPercentage: 30,
+      allowCompanies: ["globex", "acme"],
+      denyCompanies: [] as string[],
+      reason: "Reordenar empresas",
+    };
+    const first = await request("/api/admin/flags/checkout.new-flow/environments/production", {
+      method: "PUT",
+      body: JSON.stringify(firstBody),
+    });
+    expect(first.status).toBe(200);
+    const second = await request("/api/admin/flags/checkout.new-flow/environments/production", {
+      method: "PUT",
+      body: JSON.stringify({ ...firstBody, allowCompanies: ["acme", "globex"] }),
+    });
+    expect(second.status).toBe(400);
+    expect(errorOf(await readBody(second)).code).toBe("NO_CHANGES");
+    const targeting = (await auditRows(db, "checkout.new-flow")).filter((row) => row.action === "targeting_update");
+    expect(targeting).toHaveLength(1);
+  });
+
+  it("PUT sobre una flag archivada responde 409 FLAG_ARCHIVED", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const archived = await request("/api/admin/flags/search.v2/archive", {
+      method: "POST",
+      body: JSON.stringify({ reason: "Archivar para la prueba" }),
+    });
+    expect(archived.status).toBe(200);
+    const response = await request("/api/admin/flags/search.v2/environments/staging", {
+      method: "PUT",
+      body: JSON.stringify(STAGING_OPEN),
+    });
+    expect(response.status).toBe(409);
+    expect(errorOf(await readBody(response)).code).toBe("FLAG_ARCHIVED");
+  });
+
+  it("restaura el rollout de 80 a 10, conserva staging y rechaza repetir el rollback", async () => {
+    let now = new Date("2026-10-20T09:00:00.000Z");
+    const { request, db } = await createTestApp({ clock: () => now });
+    await seed(db, NOW);
+    const first = await request("/api/admin/flags/checkout.new-flow/environments/production", {
+      method: "PUT",
+      body: productionBody(10, "Bajar a 10"),
+    });
+    expect(first.status).toBe(200);
+    const stagingUpdatedAt = asFlag(await readBody(first)).environments.staging.updatedAt;
+    const second = await request("/api/admin/flags/checkout.new-flow/environments/production", {
+      method: "PUT",
+      body: productionBody(80, "Subir a 80"),
+    });
+    expect(second.status).toBe(200);
+    const listed = auditList(await readBody(await request("/api/admin/flags/checkout.new-flow/audit")));
+    const updated = listed.items.find(
+      (item) =>
+        item.action === "targeting_update" &&
+        item.changes.some((change) => change.path === "environments.production.rolloutPercentage" && change.after === 80),
+    );
+    if (updated === undefined) {
+      throw new Error("sin entrada de 80");
+    }
+    now = new Date("2026-10-20T10:00:00.000Z");
+    const restored = await request("/api/admin/flags/checkout.new-flow/rollback", {
+      method: "POST",
+      body: JSON.stringify({ auditId: updated.id, reason: "Volver al 10" }),
+    });
+    expect(restored.status).toBe(200);
+    const flag = asFlag(await readBody(restored));
+    expect(flag.environments.production.rolloutPercentage).toBe(10);
+    expect(flag.environments.production.updatedAt).toBe(now.toISOString());
+    expect(flag.environments.staging.updatedAt).toBe(stagingUpdatedAt);
+
+    const history = auditList(await readBody(await request("/api/admin/flags/checkout.new-flow/audit")));
+    const rollback = history.items[0];
+    if (rollback === undefined) {
+      throw new Error("sin rollback");
+    }
+    expect(rollback.action).toBe("rollback");
+    expect(rollback.rollbackOfId).toBe(updated.id);
+    expect(rollback.changes).toEqual([{ path: "environments.production.rolloutPercentage", before: 80, after: 10 }]);
+
+    const repeated = await request("/api/admin/flags/checkout.new-flow/rollback", {
+      method: "POST",
+      body: JSON.stringify({ auditId: updated.id, reason: "Volver al 10 otra vez" }),
+    });
+    expect(repeated.status).toBe(400);
+    expect(errorOf(await readBody(repeated)).code).toBe("NO_CHANGES");
+  });
+
+  it("rechaza el rollback de una entrada create", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const listed = auditList(await readBody(await request("/api/admin/flags/checkout.new-flow/audit")));
+    const created = listed.items.find((item) => item.action === "create");
+    if (created === undefined) {
+      throw new Error("sin alta");
+    }
+    const response = await request("/api/admin/flags/checkout.new-flow/rollback", {
+      method: "POST",
+      body: JSON.stringify({ auditId: created.id, reason: "Deshacer el alta" }),
+    });
+    expect(response.status).toBe(400);
+    const body = record(await readBody(response));
+    const error = record(body.error);
+    expect(error.code).toBe("ROLLBACK_NOT_AVAILABLE");
+    expect(error.message).toBe("No hay estado anterior que restaurar");
+  });
+
+  it("responde 404 si la entrada es de otra flag y 400 si falta el motivo", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const listed = auditList(await readBody(await request("/api/admin/flags/search.v2/audit")));
+    const foreignEntry = listed.items[0];
+    if (foreignEntry === undefined) {
+      throw new Error("sin auditoría");
+    }
+    const foreign = await request("/api/admin/flags/checkout.new-flow/rollback", {
+      method: "POST",
+      body: JSON.stringify({ auditId: foreignEntry.id, reason: "Entrada ajena" }),
+    });
+    expect(foreign.status).toBe(404);
+    expect(errorOf(await readBody(foreign)).code).toBe("NOT_FOUND");
+
+    const missingReason = await request("/api/admin/flags/checkout.new-flow/rollback", {
+      method: "POST",
+      body: JSON.stringify({ auditId: foreignEntry.id }),
+    });
+    expect(missingReason.status).toBe(400);
+    expect(errorOf(await readBody(missingReason)).code).toBe("VALIDATION_ERROR");
+  });
+
+  it("desarchiva al restaurar la entrada de archive", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const archived = await request("/api/admin/flags/search.v2/archive", {
+      method: "POST",
+      body: JSON.stringify({ reason: "Archivar para restaurar" }),
+    });
+    expect(archived.status).toBe(200);
+    const listed = auditList(await readBody(await request("/api/admin/flags/search.v2/audit")));
+    const archiveEntry = listed.items.find((item) => item.action === "archive");
+    if (archiveEntry === undefined) {
+      throw new Error("sin archive");
+    }
+    const response = await request("/api/admin/flags/search.v2/rollback", {
+      method: "POST",
+      body: JSON.stringify({ auditId: archiveEntry.id, reason: "Deshacer el archivo" }),
+    });
+    expect(response.status).toBe(200);
+    expect(asFlag(await readBody(response)).archived).toBe(false);
+  });
+
+  it("pagina el historial de las más recientes a las más antiguas", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const renamed = await request("/api/admin/flags/search.v2", {
+      method: "PATCH",
+      body: JSON.stringify({ name: "Busqueda", reason: "Renombrar la flag" }),
+    });
+    expect(renamed.status).toBe(200);
+    const owned = await request("/api/admin/flags/search.v2", {
+      method: "PATCH",
+      body: JSON.stringify({ owner: "Equipo Nuevo", reason: "Cambiar el owner" }),
+    });
+    expect(owned.status).toBe(200);
+    const first = auditList(await readBody(await request("/api/admin/flags/search.v2/audit?limit=2")));
+    expect(first.items).toHaveLength(2);
+    expect(first.items.map((item) => item.action)).toEqual(["update", "update"]);
+    expect(typeof first.nextCursor).toBe("number");
+    const second = auditList(
+      await readBody(await request(`/api/admin/flags/search.v2/audit?limit=2&cursor=${String(first.nextCursor)}`)),
+    );
+    expect(second.items.map((item) => item.action)).toEqual(["create"]);
+    expect(second.nextCursor).toBeNull();
+  });
+
+  it("no expone rutas para modificar la auditoría", async () => {
+    const { request, db } = await createTestApp({ clock });
+    await seed(db, NOW);
+    const before = (await db.select().from(schema.auditLog)).length;
+    for (const method of ["DELETE", "PATCH", "PUT"] as const) {
+      const collection = await request("/api/admin/flags/checkout.new-flow/audit", { method });
+      const entry = await request("/api/admin/flags/checkout.new-flow/audit/1", { method });
+      expect(collection.status).toBe(404);
+      expect(entry.status).toBe(404);
+    }
+    expect((await db.select().from(schema.auditLog)).length).toBe(before);
   });
 });

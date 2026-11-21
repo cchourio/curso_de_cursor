@@ -1,17 +1,18 @@
 import type { Context, ErrorHandler, NotFoundHandler } from "hono";
 
 export interface ApiErrorDetail {
-  path: string;
-  message: string;
+  path?: string;
+  message?: string;
+  companyId?: string;
 }
 
 export class ApiError extends Error {
-  readonly status: 400 | 404 | 409 | 500;
+  readonly status: 400 | 401 | 404 | 409 | 500;
   readonly code: string;
   readonly details?: readonly ApiErrorDetail[];
 
   constructor(
-    status: 400 | 404 | 409 | 500,
+    status: 400 | 401 | 404 | 409 | 500,
     code: string,
     message: string,
     details?: readonly ApiErrorDetail[],

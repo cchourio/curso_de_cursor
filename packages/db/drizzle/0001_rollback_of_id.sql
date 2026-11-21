@@ -1,0 +1,1 @@
+ALTER TABLE `audit_log` ADD `rollback_of_id` integer REFERENCES audit_log(id);

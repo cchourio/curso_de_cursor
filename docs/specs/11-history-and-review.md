@@ -12,18 +12,23 @@ Mostrar el historial de auditoría de cada flag con las diferencias entre el est
   - **RF-20:** se puede restaurar el estado anterior de cualquier entrada con una sola acción (más el motivo); el rollback genera su propia entrada.
 
   "Review" en esta spec significa **revisar los cambios**, no un flujo de aprobación (el PRD lo excluye).
+- **Estado actual (specs 01–05 hechas; 06, 07 y 08 tienen que estarlo antes de empezar).**
+  - `audit_log` ya tiene `id`, `flag_key`, `action`, `reason`, `before_state`, `after_state` y `created_at`, con índice `(flag_key, id)`. El `CHECK` y `AUDIT_ACTIONS` ya incluyen `targeting_update` y `rollback`. No amplíes esa lista. La única columna nueva es `rollback_of_id`, y su migración sale de `pnpm db:generate`. No edites a mano `packages/db/drizzle/0000_flimsy_the_initiative.sql`.
+  - `getFlagState` ya devuelve el `FlagState` descrito abajo. `diffFlagStates` y `AuditEntry` no existen todavía.
+  - `reasonSchema` y `reasonOnlyInputSchema` ya están en `@ff/domain`. `createTestApp().request()` ya lleva la sesión. Las mutaciones usan `BEGIN`/`COMMIT` en la misma conexión, no `db.transaction()`.
+  - No hay rutas de historial ni de rollback. Las acciones que ya auditan la spec 04 son `create`, `update`, `archive`, `unarchive`, `kill_switch_on` y `kill_switch_off`. `targeting_update` lo escribe la spec 08.
+- **Multitask.** Esta spec es la última de la cola. No la corras en paralelo con la 06, la 07 ni la 08, aunque `diff.ts` y la columna `rollback_of_id` no tengan UI.
+  - Los criterios 3 y 4 hacen dos `PUT` de targeting de la spec 08 y comprueban que solo cambia `environments.production.updatedAt`. Sin ese `PUT`, la spec no puede ponerse en verde.
+  - Comparte `packages/domain/src/index.ts`, `apps/api/src/routes/flags.ts` y `apps/api/src/services/flags.ts` con la 06 y con la 08. Comparte `src/lib/flags-api.ts`, `ReasonDialog` y los toasts con la 07 y la 08.
+  - Archivos de esta spec: `packages/domain/src/diff.ts`, su export, la migración de `rollback_of_id`, `GET /api/admin/flags/:key/audit` y `POST /api/admin/flags/:key/rollback` dentro de las rutas y el servicio de flags, `getAudit` y `rollback` en `flags-api.ts`, y `src/app/(app)/flags/[key]/history/`.
+  - No añadas `PUT`, `PATCH` ni `DELETE` sobre el historial. No cambies el editor de targeting, el dashboard ni los contratos de la spec 04 y la spec 08.
 - **Depende de:**
-  - **Spec 03:**
-    - Tabla `audit_log`: `id` (autoincremental), `flag_key`, `action` (uno de `create`, `update`, `archive`, `unarchive`, `kill_switch_on`, `kill_switch_off`, `targeting_update` o `rollback`), `reason`, `before_state` (JSON `FlagState` o `null` en `create`), `after_state` (JSON `FlagState`) y `created_at`. Índice en `(flag_key, id)`.
-    - Las migraciones se generan con `pnpm db:generate` (drizzle-kit, carpeta `packages/db/drizzle/`).
-    - `getFlagState(db, key)`.
-    - `FlagState` = `{ key, name, description, owner, expiresAt, killSwitch, archived, environments: Record<"development"|"staging"|"production", { enabled, rolloutPercentage, allowCompanies, denyCompanies, updatedAt }>, createdAt, updatedAt }`.
-  - **Spec 04:**
-    - Patrón de mutación: transacción, estado anterior, cambio, `flags.updated_at`, estado nuevo y auditoría.
-    - `ApiError` con el formato `{ error: { code, message, details? } }`, `reasonOnlyInputSchema` y `reasonSchema` en `@ff/domain`, `deps.clock` y `createTestApp()` (devuelve `{ app, db, request }`, y `request` ya lleva la sesión).
-  - **Spec 05:** `/api/admin/*` con sesión. En la web, `apiFetch` y las páginas bajo `src/app/(app)/`.
-  - **Spec 07:** `ReasonDialog` (`src/components/reason-dialog.tsx`, props `{ open, title, description?, confirmLabel, tone?, onConfirm(reason), onCancel }`), toasts, `src/lib/flags-api.ts` y un enlace "Historial" en el detalle que apunta a `/flags/<key>/history`.
-  - **Spec 08:** `flag_environments.updated_at` se actualiza solo en el ambiente que cambia. La spec 06 lo usa para detectar flags obsoletas.
+  - **Spec 03:** `audit_log` como está hoy, `getFlagState` y `FlagState` = `{ key, name, description, owner, expiresAt, killSwitch, archived, environments: Record<"development"|"staging"|"production", { enabled, rolloutPercentage, allowCompanies, denyCompanies, updatedAt }>, createdAt, updatedAt }`.
+  - **Spec 04:** patrón de mutación y auditoría, `ApiError` `{ error: { code, message, details? } }`, `reasonSchema`, `reasonOnlyInputSchema`, `deps.clock` y `createTestApp()`.
+  - **Spec 05:** sesión en `/api/admin/*`, `apiFetch` y las páginas bajo `src/app/(app)/`.
+  - **Spec 06:** `environments.production.updatedAt` es la fecha que decide si una flag queda obsoleta. El rollback no debe reescribir el `updatedAt` de un ambiente que no cambia.
+  - **Spec 07:** `ReasonDialog` con props `{ open, title, description?, confirmLabel, tone?, onConfirm(reason), onCancel }`, toasts, `src/lib/flags-api.ts` y el enlace "Historial" del detalle hacia `/flags/<key>/history`.
+  - **Spec 08:** `PUT /api/admin/flags/:key/environments/:env` con auditoría `targeting_update`, y `flag_environments.updated_at` actualizado solo en el ambiente que cambia.
 
 ## Alcance
 
